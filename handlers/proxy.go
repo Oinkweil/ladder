@@ -343,6 +343,9 @@ func fetchSite(urlpath string, queries map[string]string) (string, *http.Request
 
 	// log.Print("rule", rule) TODO: Add a debug mode to print the rule
 	body := rewriteHtml(bodyB, u, rule)
+	if len(rule.RegexRules) > 0 || len(rule.Injections) > 0 {
+    body = applyRules(body, rule)
+}
 	return body, req, resp, nil
 }
 
