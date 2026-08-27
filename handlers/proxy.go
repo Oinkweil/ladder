@@ -364,7 +364,7 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 			return value
 		}
 
-		// Already a Ladder URL
+		// Already rewritten by Ladder
 		if strings.HasPrefix(value, proxyPrefix) {
 			return value
 		}
@@ -376,10 +376,12 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 
 		// Absolute URLs
 		if parsed.IsAbs() {
-			// Only rewrite the original site host
+			// Only rewrite the original site
 			if parsed.Host == u.Host {
 				return proxyPrefix + parsed.RequestURI()
 			}
+
+			// Leave CDNs and external domains alone
 			return value
 		}
 
@@ -390,29 +392,18 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 				return value
 			}
 
-			// Only rewrite the main site, not media/CDNs
+			// Only rewrite the original site
 			if parsed.Host == u.Host {
 				return proxyPrefix + parsed.RequestURI()
 			}
 
+			// Leave external hosts alone
 			return value
 		}
 
-		// Root-relative URLs
+		// Root-relative URLs are same-origin
 		if strings.HasPrefix(value, "/") {
-
-			// Avoid pushing assets through Ladder.
-			// Rewrite only likely navigation paths.
-			if strings.HasPrefix(value, "/article/") ||
-				strings.HasPrefix(value, "/magazine/") ||
-				strings.HasPrefix(value, "/news/") ||
-				strings.HasPrefix(value, "/culture/") ||
-				strings.HasPrefix(value, "/archive/") {
-
-				return proxyPrefix + value
-			}
-
-			return value
+			return proxyPrefix + value
 		}
 
 		return value
@@ -451,7 +442,7 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 		}
 	})
 
-	// Inline CSS URLs
+	// Inline CSS url(...)
 	doc.Find("[style]").Each(func(i int, s *goquery.Selection) {
 		if val, ok := s.Attr("style"); ok {
 
