@@ -355,28 +355,27 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 	body := string(bodyB)
 	// No trailing slash - add it only when rewriting root-relative URLs
 	proxyPrefix := basePath + "/https://" + u.Host
-	// images
-	imagePattern := `<img\s+([^>]*\s+)?src="(/)([^"]*)"`
+	// images: only match genuinely root-relative URLs
+	imagePattern := `<img\s+([^>]*\s+)?src="/([^/][^"]*)"`
 	re := regexp.MustCompile(imagePattern)
-	body = re.ReplaceAllString(body, fmt.Sprintf(`<img $1 src="%s/$3"`, proxyPrefix))
-	// scripts
-	scriptPattern := `<script\s+([^>]*\s+)?src="(/)([^"]*)"`
+	body = re.ReplaceAllString(body, fmt.Sprintf(`<img $1 src="%s/$2"`, proxyPrefix))
+	// scripts: only match genuinely root-relative URLs
+	scriptPattern := `<script\s+([^>]*\s+)?src="/([^/][^"]*)"`
 	reScript := regexp.MustCompile(scriptPattern)
-	body = reScript.ReplaceAllString(body, fmt.Sprintf(`<script $1 src="%s/$3"`, proxyPrefix))
-	// Root-relative href URLs only.
-	// Avoid matching the second slash in https://
+	body = reScript.ReplaceAllString(body, fmt.Sprintf(`<script $1 src="%s/$2"`, proxyPrefix))
+	// Root-relative href URLs only
 	hrefPattern := `href="/([^/][^"]*)"`
 	reHref := regexp.MustCompile(hrefPattern)
 	body = reHref.ReplaceAllString(body, `href="`+proxyPrefix+`/$1"`)
-	// Root-relative src URLs not already handled above
+	// Root-relative src URLs only
 	srcPattern := `src="/([^/][^"]*)"`
 	reSrc := regexp.MustCompile(srcPattern)
 	body = reSrc.ReplaceAllString(body, `src="`+proxyPrefix+`/$1"`)
-	// srcset root-relative URLs
+	// Root-relative srcset URLs only
 	srcsetPattern := `srcset="/([^"]*)"`
 	reSrcset := regexp.MustCompile(srcsetPattern)
 	body = reSrcset.ReplaceAllString(body, `srcset="`+proxyPrefix+`/$1"`)
-	// CSS url() root-relative URLs
+	// CSS root-relative url() references
 	cssURLPattern := `url$begin:math:text$\[\"\'\]\?\/\(\[\^\/\]\[\^\)\"\'\]\*\)\[\"\'\]\?$end:math:text$`
 	reCSS := regexp.MustCompile(cssURLPattern)
 	body = reCSS.ReplaceAllString(body, `url(`+proxyPrefix+`/$1)`)
