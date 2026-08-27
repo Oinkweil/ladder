@@ -352,24 +352,23 @@ func fetchSite(urlpath string, queries map[string]string) (string, *http.Request
 func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 	// Rewrite the HTML
 	body := string(bodyB)
-
-	proxyPrefix := basePath + "/https://" + u.Host + "/"
-
+	// Do not include a trailing slash here. Root-relative URLs already
+	// begin with "/", and adding another one creates // in rewritten URLs.
+	proxyPrefix := basePath + "/https://" + u.Host
 	// images
 	imagePattern := `<img\s+([^>]*\s+)?src="(/)([^"]*)"`
 	re := regexp.MustCompile(imagePattern)
-	body = re.ReplaceAllString(body, fmt.Sprintf(`<img $1 src="%s$3"`, proxyPrefix))
-
+	body = re.ReplaceAllString(body, fmt.Sprintf(`<img $1 src="%s/$3"`, proxyPrefix))
 	// scripts
 	scriptPattern := `<script\s+([^>]*\s+)?src="(/)([^"]*)"`
 	reScript := regexp.MustCompile(scriptPattern)
-	body = reScript.ReplaceAllString(body, fmt.Sprintf(`<script $1 script="%s$3"`, proxyPrefix))
-
+	body = reScript.ReplaceAllString(body, fmt.Sprintf(`<script $1 src="%s/$3"`, proxyPrefix))
 	// body = strings.ReplaceAll(body, "srcset=\"/", "srcset=\""+proxyPrefix) // TODO: Needs a regex to rewrite the URL's
-	body = strings.ReplaceAll(body, "href=\"/", "href=\""+proxyPrefix)
-	body = strings.ReplaceAll(body, "url('/", "url('"+proxyPrefix)
-	body = strings.ReplaceAll(body, "url(/", "url("+proxyPrefix)
+	body = strings.ReplaceAll(body, "href=\"/", "href=\""+proxyPrefix+"/")
+	body = strings.ReplaceAll(body, "url('/", "url('"+proxyPrefix+"/")
+	body = strings.ReplaceAll(body, "url(/", "url("+proxyPrefix+"/")
 	body = strings.ReplaceAll(body, "href=\"https://"+u.Host, "href=\""+proxyPrefix)
+
 	return body
 }
 
