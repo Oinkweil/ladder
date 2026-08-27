@@ -356,31 +356,29 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 	// No trailing slash - add it only when rewriting root-relative URLs
 	proxyPrefix := basePath + "/https://" + u.Host
 	// images: only match genuinely root-relative URLs
-	imagePattern := `<img\s+([^>]*\s+)?src="/([^/][^"]*)"`
+	imagePattern := `<img\s+([^>]*\s+)?src="/(?!https?://)([^"]*)"`
 	re := regexp.MustCompile(imagePattern)
 	body = re.ReplaceAllString(body, fmt.Sprintf(`<img $1 src="%s/$2"`, proxyPrefix))
 	// scripts: only match genuinely root-relative URLs
-	scriptPattern := `<script\s+([^>]*\s+)?src="/([^/][^"]*)"`
+	scriptPattern := `<script\s+([^>]*\s+)?src="/(?!https?://)([^"]*)"`
 	reScript := regexp.MustCompile(scriptPattern)
 	body = reScript.ReplaceAllString(body, fmt.Sprintf(`<script $1 src="%s/$2"`, proxyPrefix))
 	// Root-relative href URLs only
-	hrefPattern := `href="/([^/][^"]*)"`
+	hrefPattern := `href="/(?!https?://)([^"]*)"`
 	reHref := regexp.MustCompile(hrefPattern)
 	body = reHref.ReplaceAllString(body, `href="`+proxyPrefix+`/$1"`)
 	// Root-relative src URLs only
-	srcPattern := `src="/([^/][^"]*)"`
+	srcPattern := `src="/(?!https?://)([^"]*)"`
 	reSrc := regexp.MustCompile(srcPattern)
 	body = reSrc.ReplaceAllString(body, `src="`+proxyPrefix+`/$1"`)
 	// Root-relative srcset URLs only
-	srcsetPattern := `srcset="/([^"]*)"`
+	srcsetPattern := `srcset="/(?!https?://)([^"]*)"`
 	reSrcset := regexp.MustCompile(srcsetPattern)
 	body = reSrcset.ReplaceAllString(body, `srcset="`+proxyPrefix+`/$1"`)
-	// CSS root-relative url() references
-	cssURLPattern := `url$begin:math:text$\[\"\'\]\?\/\(\[\^\/\]\[\^\)\"\'\]\*\)\[\"\'\]\?$end:math:text$`
+	// CSS root-relative url() references only
+	cssURLPattern := `url$begin:math:text$\[\"\'\]\?\/\(\?\!https\?\:\/\/\)\(\[\^\)\"\'\]\*\)\[\"\'\]\?$end:math:text$`
 	reCSS := regexp.MustCompile(cssURLPattern)
 	body = reCSS.ReplaceAllString(body, `url(`+proxyPrefix+`/$1)`)
-	// Absolute URLs already pointing to the current host
-	body = strings.ReplaceAll(body, "href=\"https://"+u.Host, "href=\""+proxyPrefix)
 
 	return body
 }
