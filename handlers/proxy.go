@@ -350,10 +350,10 @@ func fetchSite(urlpath string, queries map[string]string) (string, *http.Request
 }
 
 func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
+
 	// Rewrite the HTML
 	body := string(bodyB)
-	// Do not include a trailing slash here. Root-relative URLs already
-	// begin with "/", and adding another one creates // in rewritten URLs.
+	// No trailing slash - add it only when rewriting root-relative URLs
 	proxyPrefix := basePath + "/https://" + u.Host
 	// images
 	imagePattern := `<img\s+([^>]*\s+)?src="(/)([^"]*)"`
@@ -363,10 +363,24 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 	scriptPattern := `<script\s+([^>]*\s+)?src="(/)([^"]*)"`
 	reScript := regexp.MustCompile(scriptPattern)
 	body = reScript.ReplaceAllString(body, fmt.Sprintf(`<script $1 src="%s/$3"`, proxyPrefix))
-	// body = strings.ReplaceAll(body, "srcset=\"/", "srcset=\""+proxyPrefix) // TODO: Needs a regex to rewrite the URL's
-	body = strings.ReplaceAll(body, "href=\"/", "href=\""+proxyPrefix+"/")
-	body = strings.ReplaceAll(body, "url('/", "url('"+proxyPrefix+"/")
-	body = strings.ReplaceAll(body, "url(/", "url("+proxyPrefix+"/")
+	// Root-relative href URLs only.
+	// Avoid matching the second slash in https://
+	hrefPattern := `href="/([^/][^"]*)"`
+	reHref := regexp.MustCompile(hrefPattern)
+	body = reHref.ReplaceAllString(body, `href="`+proxyPrefix+`/$1"`)
+	// Root-relative src URLs not already handled above
+	srcPattern := `src="/([^/][^"]*)"`
+	reSrc := regexp.MustCompile(srcPattern)
+	body = reSrc.ReplaceAllString(body, `src="`+proxyPrefix+`/$1"`)
+	// srcset root-relative URLs
+	srcsetPattern := `srcset="/([^"]*)"`
+	reSrcset := regexp.MustCompile(srcsetPattern)
+	body = reSrcset.ReplaceAllString(body, `srcset="`+proxyPrefix+`/$1"`)
+	// CSS url() root-relative URLs
+	cssURLPattern := `url$begin:math:text$\[\"\'\]\?\/\(\[\^\/\]\[\^\)\"\'\]\*\)\[\"\'\]\?$end:math:text$`
+	reCSS := regexp.MustCompile(cssURLPattern)
+	body = reCSS.ReplaceAllString(body, `url(`+proxyPrefix+`/$1)`)
+	// Absolute URLs already pointing to the current host
 	body = strings.ReplaceAll(body, "href=\"https://"+u.Host, "href=\""+proxyPrefix)
 
 	return body
