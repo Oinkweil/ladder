@@ -351,102 +351,47 @@ func fetchSite(urlpath string, queries map[string]string) (string, *http.Request
 
 func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 
+	// Rewrite the HTML
 	body := string(bodyB)
-	proxyPrefix := basePath + "/https://" + u.Host
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(body))
-	if err != nil {
-		return body
-	}
-	rewriteURL := func(value string) string {
-
-	// Leave empty values alone
-	if value == "" {
-		return value
-	}
-	// Already a Ladder URL - do not touch it
-	if strings.HasPrefix(value, proxyPrefix) {
-		return value
-	}
-	// Fix malformed absolute URLs that start with a slash.
+	proxyPrefix := basePath + "/https://" + u.Host + "/"
+	// Avoid double rewriting Ladder URLs
 	// Example:
-	// /https://www.newyorker.com/foo
+	// /https://www.newyorker.com/https://www.newyorker.com/foo
+	body = strings.ReplaceAll(
+		body,
+		proxyPrefix+"https://"+u.Host+"/",
+		proxyPrefix,
+	)
+	// images
+	imagePattern := `<img\s+([^>]*\s+)?src="(/)([^"]*)"`
+	re := regexp.MustCompile(imagePattern)
+	body = re.ReplaceAllString(body, fmt.Sprintf(`<img $1 src="%s$3"`, proxyPrefix))
+	// scripts
+	scriptPattern := `<script\s+([^>]*\s+)?src="(/)([^"]*)"`
+	reScript := regexp.MustCompile(scriptPattern)
+	body = reScript.ReplaceAllString(body, fmt.Sprintf(`<script $1 src="%s$3"`, proxyPrefix))
+	// protocol-relative URLs
+	// Example:
+	// //www.newyorker.com/image.jpg
 	// becomes:
-	// https://www.newyorker.com/foo
-	if strings.HasPrefix(value, "/http://") || strings.HasPrefix(value, "/https://") {
-		value = strings.TrimPrefix(value, "/")
-	}
-	parsed, err := url.Parse(value)
-	if err != nil {
-		return value
-	}
-	// Absolute URLs:
-	// Rewrite only this site's absolute URLs.
-	if parsed.IsAbs() {
-		if parsed.Host == u.Host {
-			return proxyPrefix + parsed.RequestURI()
-		}
-		return value
-	}
-	// Protocol-relative URLs
-	if strings.HasPrefix(value, "//") {
-		parsed, err := url.Parse("https:" + value)
-		if err != nil {
-			return value
-		}
-		if parsed.Host == u.Host {
-			return proxyPrefix + parsed.RequestURI()
-		}
-		return value
-	}
-	// Root-relative URLs
-	if strings.HasPrefix(value, "/") {
-		return proxyPrefix + value
-	}
-	return value
-	}
-	// Rewrite common URL attributes
-	doc.Find("[src]").Each(func(i int, s *goquery.Selection) {
-		if val, exists := s.Attr("src"); exists {
-			s.SetAttr("src", rewriteURL(val))
-		}
-	})
-	doc.Find("[href]").Each(func(i int, s *goquery.Selection) {
-		if val, exists := s.Attr("href"); exists {
-			s.SetAttr("href", rewriteURL(val))
-		}
-	})
-	doc.Find("[srcset]").Each(func(i int, s *goquery.Selection) {
-		if val, exists := s.Attr("srcset"); exists {
-			parts := strings.Split(val, ",")
-			for i, part := range parts {
-				fields := strings.Fields(strings.TrimSpace(part))
-				if len(fields) > 0 {
-					fields[0] = rewriteURL(fields[0])
-					parts[i] = strings.Join(fields, " ")
-				}
-			}
-			s.SetAttr("srcset", strings.Join(parts, ", "))
-		}
-	})
-	// CSS inline styles
-	doc.Find("[style]").Each(func(i int, s *goquery.Selection) {
-		if val, exists := s.Attr("style"); exists {
-			re := regexp.MustCompile(`url$begin:math:text$\(\[\'\"\]\?\)\(\[\^\'\"\)\]\+\)\\1$end:math:text$`)
-			val = re.ReplaceAllStringFunc(val, func(match string) string {
-				sub := re.FindStringSubmatch(match)
-				if len(sub) < 3 {
-					return match
-				}
-				return "url(" + sub[1] + rewriteURL(sub[2]) + sub[1] + ")"
-			})
-			s.SetAttr("style", val)
-		}
-	})
-	result, err := doc.Html()
-	if err != nil {
-		return body
-	}
-	return result
+	// /https://www.newyorker.com/image.jpg
+	protocolRelative := regexp.MustCompile(`(["'(=])//` + regexp.QuoteMeta(u.Host) + `/`)
+	body = protocolRelative.ReplaceAllString(
+		body,
+		`$1`+proxyPrefix,
+	)
+	// root-relative links
+	body = strings.ReplaceAll(body, "href=\"/", "href=\""+proxyPrefix)
+	// CSS urls
+	body = strings.ReplaceAll(body, "url('/", "url('"+proxyPrefix)
+	body = strings.ReplaceAll(body, "url(/", "url("+proxyPrefix)
+	// absolute links to the same host
+	body = strings.ReplaceAll(
+		body,
+		"href=\"https://"+u.Host,
+		"href=\""+proxyPrefix,
+	)
+	return body
 }
 
 func getenv(key, fallback string) string {
