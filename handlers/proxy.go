@@ -358,43 +358,51 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 		return body
 	}
 	rewriteURL := func(value string) string {
-		// Leave empty values alone
-		if value == "" {
-			return value
+
+	// Leave empty values alone
+	if value == "" {
+		return value
+	}
+	// Already a Ladder URL - do not touch it
+	if strings.HasPrefix(value, proxyPrefix) {
+		return value
+	}
+	// Fix malformed absolute URLs that start with a slash.
+	// Example:
+	// /https://www.newyorker.com/foo
+	// becomes:
+	// https://www.newyorker.com/foo
+	if strings.HasPrefix(value, "/http://") || strings.HasPrefix(value, "/https://") {
+		value = strings.TrimPrefix(value, "/")
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return value
+	}
+	// Absolute URLs:
+	// Rewrite only this site's absolute URLs.
+	if parsed.IsAbs() {
+		if parsed.Host == u.Host {
+			return proxyPrefix + parsed.RequestURI()
 		}
-		// Already a Ladder URL - do not touch it
-		if strings.HasPrefix(value, proxyPrefix) {
-			return value
-		}
-		parsed, err := url.Parse(value)
+		return value
+	}
+	// Protocol-relative URLs
+	if strings.HasPrefix(value, "//") {
+		parsed, err := url.Parse("https:" + value)
 		if err != nil {
 			return value
 		}
-		// Absolute URLs:
-		// Leave external domains alone.
-		// Rewrite only this site's absolute URLs.
-		if parsed.IsAbs() {
-			if parsed.Host == u.Host {
-				return proxyPrefix + parsed.RequestURI()
-			}
-			return value
-		}
-		// Protocol-relative URLs
-		if strings.HasPrefix(value, "//") {
-			parsed, err := url.Parse("https:" + value)
-			if err != nil {
-				return value
-			}
-			if parsed.Host == u.Host {
-				return proxyPrefix + parsed.RequestURI()
-			}
-			return value
-		}
-		// Root-relative URLs
-		if strings.HasPrefix(value, "/") {
-			return proxyPrefix + value
+		if parsed.Host == u.Host {
+			return proxyPrefix + parsed.RequestURI()
 		}
 		return value
+	}
+	// Root-relative URLs
+	if strings.HasPrefix(value, "/") {
+		return proxyPrefix + value
+	}
+	return value
 	}
 	// Rewrite common URL attributes
 	doc.Find("[src]").Each(func(i int, s *goquery.Selection) {
