@@ -350,39 +350,26 @@ func fetchSite(urlpath string, queries map[string]string) (string, *http.Request
 }
 
 func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
-
 	// Rewrite the HTML
 	body := string(bodyB)
+
 	proxyPrefix := basePath + "/https://" + u.Host + "/"
+
 	// images
 	imagePattern := `<img\s+([^>]*\s+)?src="(/)([^"]*)"`
 	re := regexp.MustCompile(imagePattern)
 	body = re.ReplaceAllString(body, fmt.Sprintf(`<img $1 src="%s$3"`, proxyPrefix))
+
 	// scripts
 	scriptPattern := `<script\s+([^>]*\s+)?src="(/)([^"]*)"`
 	reScript := regexp.MustCompile(scriptPattern)
-	body = reScript.ReplaceAllString(body, fmt.Sprintf(`<script $1 src="%s$3"`, proxyPrefix))
-	// Protocol-relative URLs
-	// Fix:
-	//   //www.example.com/path
-	// to:
-	//   /https://www.example.com/path
-	//
-	// Only rewrite the current host.
-	protocolRelativePattern := `(["'(=])//` + regexp.QuoteMeta(u.Host) + `/`
-	reProtocol := regexp.MustCompile(protocolRelativePattern)
-	body = reProtocol.ReplaceAllString(body, `$1`+proxyPrefix)
-	// Root-relative hrefs
+	body = reScript.ReplaceAllString(body, fmt.Sprintf(`<script $1 script="%s$3"`, proxyPrefix))
+
+	// body = strings.ReplaceAll(body, "srcset=\"/", "srcset=\""+proxyPrefix) // TODO: Needs a regex to rewrite the URL's
 	body = strings.ReplaceAll(body, "href=\"/", "href=\""+proxyPrefix)
-	// CSS inline URLs
 	body = strings.ReplaceAll(body, "url('/", "url('"+proxyPrefix)
 	body = strings.ReplaceAll(body, "url(/", "url("+proxyPrefix)
-	// Absolute hrefs to the same host
-	body = strings.ReplaceAll(
-		body,
-		"href=\"https://"+u.Host,
-		"href=\""+proxyPrefix,
-	)
+	body = strings.ReplaceAll(body, "href=\"https://"+u.Host, "href=\""+proxyPrefix)
 	return body
 }
 
