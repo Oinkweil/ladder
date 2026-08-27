@@ -354,14 +354,6 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 	// Rewrite the HTML
 	body := string(bodyB)
 	proxyPrefix := basePath + "/https://" + u.Host + "/"
-	// Avoid double rewriting Ladder URLs
-	// Example:
-	// /https://www.newyorker.com/https://www.newyorker.com/foo
-	body = strings.ReplaceAll(
-		body,
-		proxyPrefix+"https://"+u.Host+"/",
-		proxyPrefix,
-	)
 	// images
 	imagePattern := `<img\s+([^>]*\s+)?src="(/)([^"]*)"`
 	re := regexp.MustCompile(imagePattern)
@@ -370,22 +362,19 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 	scriptPattern := `<script\s+([^>]*\s+)?src="(/)([^"]*)"`
 	reScript := regexp.MustCompile(scriptPattern)
 	body = reScript.ReplaceAllString(body, fmt.Sprintf(`<script $1 src="%s$3"`, proxyPrefix))
-	// protocol-relative URLs
-	// Example:
-	// //www.newyorker.com/image.jpg
-	// becomes:
-	// /https://www.newyorker.com/image.jpg
-	protocolRelative := regexp.MustCompile(`(["'(=])//` + regexp.QuoteMeta(u.Host) + `/`)
-	body = protocolRelative.ReplaceAllString(
-		body,
-		`$1`+proxyPrefix,
-	)
-	// root-relative links
+	// protocol-relative URLs for this host
+	// //www.example.com/path
+	// becomes
+	// /https://www.example.com/path
+	protocolRelativePattern := `(["'=])//` + regexp.QuoteMeta(u.Host) + `/`
+	reProtocol := regexp.MustCompile(protocolRelativePattern)
+	body = reProtocol.ReplaceAllString(body, `$1`+proxyPrefix)
+	// root-relative hrefs
 	body = strings.ReplaceAll(body, "href=\"/", "href=\""+proxyPrefix)
-	// CSS urls
+	// CSS URLs
 	body = strings.ReplaceAll(body, "url('/", "url('"+proxyPrefix)
 	body = strings.ReplaceAll(body, "url(/", "url("+proxyPrefix)
-	// absolute links to the same host
+	// same-host absolute hrefs
 	body = strings.ReplaceAll(
 		body,
 		"href=\"https://"+u.Host,
