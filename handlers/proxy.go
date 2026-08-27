@@ -350,27 +350,119 @@ func fetchSite(urlpath string, queries map[string]string) (string, *http.Request
 }
 
 func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
-	// Rewrite the HTML
 	body := string(bodyB)
 
-	proxyPrefix := basePath + "/https://" + u.Host + "/"
+	proxyPrefix := basePath + "/https://" + u.Host
 
-	// images
-	imagePattern := `<img\s+([^>]*\s+)?src="(/)([^"]*)"`
-	re := regexp.MustCompile(imagePattern)
-	body = re.ReplaceAllString(body, fmt.Sprintf(`<img $1 src="%s$3"`, proxyPrefix))
+	rewriteURL := func(value string) string {
+		if value == "" {
+			return value
+		}
 
-	// scripts
-	scriptPattern := `<script\s+([^>]*\s+)?src="(/)([^"]*)"`
-	reScript := regexp.MustCompile(scriptPattern)
-	body = reScript.ReplaceAllString(body, fmt.Sprintf(`<script $1 script="%s$3"`, proxyPrefix))
+		// Already rewritten
+		if strings.HasPrefix(value, proxyPrefix) {
+			return value
+		}
 
-	// body = strings.ReplaceAll(body, "srcset=\"/", "srcset=\""+proxyPrefix) // TODO: Needs a regex to rewrite the URL's
-	body = strings.ReplaceAll(body, "href=\"/", "href=\""+proxyPrefix)
-	body = strings.ReplaceAll(body, "url('/", "url('"+proxyPrefix)
-	body = strings.ReplaceAll(body, "url(/", "url("+proxyPrefix)
-	body = strings.ReplaceAll(body, "href=\"https://"+u.Host, "href=\""+proxyPrefix)
-	return body
+		// Absolute URL
+		parsed, err := url.Parse(value)
+		if err == nil && parsed.IsAbs() {
+			// Only rewrite the actual site host
+			if parsed.Host == u.Host {
+				return proxyPrefix + parsed.RequestURI()
+			}
+			return value
+		}
+
+		// Protocol-relative URL
+		if strings.HasPrefix(value, "//") {
+			parsed, err := url.Parse("https:" + value)
+			if err != nil {
+				return value
+			}
+
+			// Only rewrite the site itself, not CDNs
+			if parsed.Host == u.Host {
+				return proxyPrefix + parsed.RequestURI()
+			}
+			return value
+		}
+
+		// Root-relative URL
+		if strings.HasPrefix(value, "/") {
+			// These are ambiguous. Only rewrite likely navigation URLs.
+			// Leave static assets alone.
+			if strings.HasPrefix(value, "/article/") ||
+				strings.HasPrefix(value, "/magazine/") ||
+				strings.HasPrefix(value, "/news/") ||
+				strings.HasPrefix(value, "/culture/") ||
+				strings.HasPrefix(value, "/archive/") {
+				return proxyPrefix + value
+			}
+
+			return value
+		}
+
+		return value
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(body))
+	if err != nil {
+		return body
+	}
+
+	// src attributes
+	doc.Find("[src]").Each(func(i int, s *goquery.Selection) {
+		if val, ok := s.Attr("src"); ok {
+			s.SetAttr("src", rewriteURL(val))
+		}
+	})
+
+	// href attributes
+	doc.Find("[href]").Each(func(i int, s *goquery.Selection) {
+		if val, ok := s.Attr("href"); ok {
+			s.SetAttr("href", rewriteURL(val))
+		}
+	})
+
+	// srcset
+	doc.Find("[srcset]").Each(func(i int, s *goquery.Selection) {
+		if val, ok := s.Attr("srcset"); ok {
+			parts := strings.Split(val, ",")
+			for n, part := range parts {
+				fields := strings.Fields(strings.TrimSpace(part))
+				if len(fields) > 0 {
+					fields[0] = rewriteURL(fields[0])
+					parts[n] = strings.Join(fields, " ")
+				}
+			}
+			s.SetAttr("srcset", strings.Join(parts, ", "))
+		}
+	})
+
+	// Inline CSS URLs
+	doc.Find("[style]").Each(func(i int, s *goquery.Selection) {
+		if val, ok := s.Attr("style"); ok {
+			re := regexp.MustCompile(`url\((['"]?)([^'")]+)\1\)`)
+
+			val = re.ReplaceAllStringFunc(val, func(match string) string {
+				sub := re.FindStringSubmatch(match)
+				if len(sub) != 3 {
+					return match
+				}
+				return "url(" + sub[1] + rewriteURL(sub[2]) + sub[1] + ")"
+			})
+
+			s.SetAttr("style", val)
+		}
+	})
+
+	result, err := doc.Html()
+	if err != nil {
+		return body
+	}
+
+	return result
 }
 
 func getenv(key, fallback string) string {
