@@ -362,19 +362,22 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 	scriptPattern := `<script\s+([^>]*\s+)?src="(/)([^"]*)"`
 	reScript := regexp.MustCompile(scriptPattern)
 	body = reScript.ReplaceAllString(body, fmt.Sprintf(`<script $1 src="%s$3"`, proxyPrefix))
-	// protocol-relative URLs for this host
-	// //www.example.com/path
-	// becomes
-	// /https://www.example.com/path
-	protocolRelativePattern := `(["'=])//` + regexp.QuoteMeta(u.Host) + `/`
+	// Protocol-relative URLs
+	// Fix:
+	//   //www.example.com/path
+	// to:
+	//   /https://www.example.com/path
+	//
+	// Only rewrite the current host.
+	protocolRelativePattern := `(["'(=])//` + regexp.QuoteMeta(u.Host) + `/`
 	reProtocol := regexp.MustCompile(protocolRelativePattern)
 	body = reProtocol.ReplaceAllString(body, `$1`+proxyPrefix)
-	// root-relative hrefs
+	// Root-relative hrefs
 	body = strings.ReplaceAll(body, "href=\"/", "href=\""+proxyPrefix)
-	// CSS URLs
+	// CSS inline URLs
 	body = strings.ReplaceAll(body, "url('/", "url('"+proxyPrefix)
 	body = strings.ReplaceAll(body, "url(/", "url("+proxyPrefix)
-	// same-host absolute hrefs
+	// Absolute hrefs to the same host
 	body = strings.ReplaceAll(
 		body,
 		"href=\"https://"+u.Host,
