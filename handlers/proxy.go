@@ -350,9 +350,10 @@ func fetchSite(urlpath string, queries map[string]string) (string, *http.Request
 }
 
 func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
+
 	body := string(bodyB)
 
-	proxyPrefix := basePath + "/https://" + u.Host
+	proxyPrefix := basePath + "/https://" + u.Host + "/"
 
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(body))
 	if err != nil {
@@ -360,28 +361,20 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 	}
 
 	rewriteURL := func(value string) string {
+
 		if value == "" {
 			return value
 		}
 
-		// Already rewritten by Ladder
-		if strings.HasPrefix(value, proxyPrefix) {
+		// Already a Ladder URL
+		if strings.HasPrefix(value, basePath+"/https://") {
 			return value
 		}
 
-		parsed, err := url.Parse(value)
-		if err != nil {
-			return value
-		}
-
-		// Absolute URLs
-		if parsed.IsAbs() {
-			// Only rewrite the original site
-			if parsed.Host == u.Host {
-				return proxyPrefix + parsed.RequestURI()
-			}
-
-			// Leave CDNs and external domains alone
+		// Ignore non URL resources
+		if strings.HasPrefix(value, "data:") ||
+			strings.HasPrefix(value, "mailto:") ||
+			strings.HasPrefix(value, "javascript:") {
 			return value
 		}
 
@@ -392,22 +385,39 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 				return value
 			}
 
-			// Only rewrite the original site
 			if parsed.Host == u.Host {
 				return proxyPrefix + parsed.RequestURI()
 			}
 
-			// Leave external hosts alone
+			// CDN / external host
 			return value
 		}
 
-		// Root-relative URLs are same-origin
+		parsed, err := url.Parse(value)
+		if err != nil {
+			return value
+		}
+
+		// Absolute URLs
+		if parsed.IsAbs() {
+
+			// Only proxy the original site
+			if parsed.Host == u.Host {
+				return proxyPrefix + parsed.RequestURI()
+			}
+
+			// Leave CDNs alone
+			return value
+		}
+
+		// Root-relative URLs
 		if strings.HasPrefix(value, "/") {
-			return proxyPrefix + value
+			return proxyPrefix + strings.TrimPrefix(value, "/")
 		}
 
 		return value
 	}
+
 
 	// src attributes
 	doc.Find("[src]").Each(func(i int, s *goquery.Selection) {
@@ -416,6 +426,7 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 		}
 	})
 
+
 	// href attributes
 	doc.Find("[href]").Each(func(i int, s *goquery.Selection) {
 		if val, ok := s.Attr("href"); ok {
@@ -423,18 +434,21 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 		}
 	})
 
+
 	// srcset attributes
 	doc.Find("[srcset]").Each(func(i int, s *goquery.Selection) {
+
 		if val, ok := s.Attr("srcset"); ok {
 
 			parts := strings.Split(val, ",")
 
-			for n, part := range parts {
+			for i, part := range parts {
+
 				fields := strings.Fields(strings.TrimSpace(part))
 
 				if len(fields) > 0 {
 					fields[0] = rewriteURL(fields[0])
-					parts[n] = strings.Join(fields, " ")
+					parts[i] = strings.Join(fields, " ")
 				}
 			}
 
@@ -442,32 +456,31 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 		}
 	})
 
-	// Inline CSS url(...)
+
+	// Inline style=""
 	doc.Find("[style]").Each(func(i int, s *goquery.Selection) {
+
 		if val, ok := s.Attr("style"); ok {
-
-			re := regexp.MustCompile(`url\((['"]?)([^'")]+)(['"]?)\)`)
-
-			val = re.ReplaceAllStringFunc(val, func(match string) string {
-
-				sub := re.FindStringSubmatch(match)
-
-				if len(sub) != 4 {
-					return match
-				}
-
-				quote := sub[1]
-
-				if quote == "" {
-					quote = sub[3]
-				}
-
-				return "url(" + quote + rewriteURL(sub[2]) + quote + ")"
-			})
-
-			s.SetAttr("style", val)
+			s.SetAttr("style", rewriteCSSURLs(val, rewriteURL))
 		}
 	})
+
+
+	// <style> blocks (this fixes fonts/background images)
+	doc.Find("style").Each(func(i int, s *goquery.Selection) {
+
+		if len(s.Nodes) == 0 {
+			return
+		}
+
+		for _, node := range s.Nodes[0].ChildNodes {
+
+			if node.Type == html.TextNode {
+				node.Data = rewriteCSSURLs(node.Data, rewriteURL)
+			}
+		}
+	})
+
 
 	result, err := doc.Html()
 	if err != nil {
