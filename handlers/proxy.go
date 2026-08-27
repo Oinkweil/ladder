@@ -355,26 +355,14 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 
 	proxyPrefix := basePath + "/https://" + u.Host + "/"
 
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(body))
-	if err != nil {
-		return body
-	}
-
 	rewriteURL := func(value string) string {
 
 		if value == "" {
 			return value
 		}
 
-		// Already a Ladder URL
-		if strings.HasPrefix(value, basePath+"/https://") {
-			return value
-		}
-
-		// Ignore non URL resources
-		if strings.HasPrefix(value, "data:") ||
-			strings.HasPrefix(value, "mailto:") ||
-			strings.HasPrefix(value, "javascript:") {
+		// Already proxied
+		if strings.HasPrefix(value, proxyPrefix) {
 			return value
 		}
 
@@ -389,7 +377,7 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 				return proxyPrefix + parsed.RequestURI()
 			}
 
-			// CDN / external host
+			// CDN or external domain: leave untouched
 			return value
 		}
 
@@ -398,19 +386,18 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 			return value
 		}
 
-		// Absolute URLs
+		// Absolute URL
 		if parsed.IsAbs() {
 
-			// Only proxy the original site
+			// Only rewrite the original site
 			if parsed.Host == u.Host {
 				return proxyPrefix + parsed.RequestURI()
 			}
 
-			// Leave CDNs alone
 			return value
 		}
 
-		// Root-relative URLs
+		// Root relative URL
 		if strings.HasPrefix(value, "/") {
 			return proxyPrefix + strings.TrimPrefix(value, "/")
 		}
@@ -420,74 +407,87 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 
 
 	// src attributes
-	doc.Find("[src]").Each(func(i int, s *goquery.Selection) {
-		if val, ok := s.Attr("src"); ok {
-			s.SetAttr("src", rewriteURL(val))
+	srcRe := regexp.MustCompile(`src="([^"]+)"`)
+	body = srcRe.ReplaceAllStringFunc(body, func(match string) string {
+
+		parts := strings.SplitN(match, `"`, 3)
+
+		if len(parts) != 3 {
+			return match
 		}
+
+		return `src="` + rewriteURL(parts[1]) + `"`
 	})
 
 
 	// href attributes
-	doc.Find("[href]").Each(func(i int, s *goquery.Selection) {
-		if val, ok := s.Attr("href"); ok {
-			s.SetAttr("href", rewriteURL(val))
+	hrefRe := regexp.MustCompile(`href="([^"]+)"`)
+	body = hrefRe.ReplaceAllStringFunc(body, func(match string) string {
+
+		parts := strings.SplitN(match, `"`, 3)
+
+		if len(parts) != 3 {
+			return match
 		}
+
+		return `href="` + rewriteURL(parts[1]) + `"`
 	})
 
 
-	// srcset attributes
-	doc.Find("[srcset]").Each(func(i int, s *goquery.Selection) {
+	// srcset
+	srcsetRe := regexp.MustCompile(`srcset="([^"]+)"`)
+	body = srcsetRe.ReplaceAllStringFunc(body, func(match string) string {
 
-		if val, ok := s.Attr("srcset"); ok {
+		parts := strings.SplitN(match, `"`, 3)
 
-			parts := strings.Split(val, ",")
-
-			for i, part := range parts {
-
-				fields := strings.Fields(strings.TrimSpace(part))
-
-				if len(fields) > 0 {
-					fields[0] = rewriteURL(fields[0])
-					parts[i] = strings.Join(fields, " ")
-				}
-			}
-
-			s.SetAttr("srcset", strings.Join(parts, ", "))
-		}
-	})
-
-
-	// Inline style=""
-	doc.Find("[style]").Each(func(i int, s *goquery.Selection) {
-
-		if val, ok := s.Attr("style"); ok {
-			s.SetAttr("style", rewriteCSSURLs(val, rewriteURL))
-		}
-	})
-
-
-	// <style> blocks (this fixes fonts/background images)
-	doc.Find("style").Each(func(i int, s *goquery.Selection) {
-
-		if len(s.Nodes) == 0 {
-			return
+		if len(parts) != 3 {
+			return match
 		}
 
-		for _, node := range s.Nodes[0].ChildNodes {
+		items := strings.Split(parts[1], ",")
 
-			if node.Type == html.TextNode {
-				node.Data = rewriteCSSURLs(node.Data, rewriteURL)
+		for i, item := range items {
+
+			fields := strings.Fields(strings.TrimSpace(item))
+
+			if len(fields) > 0 {
+				fields[0] = rewriteURL(fields[0])
+				items[i] = strings.Join(fields, " ")
 			}
 		}
+
+		return `srcset="` + strings.Join(items, ", ") + `"`
 	})
 
 
-	result, err := doc.Html()
-	if err != nil {
-		return body
-	}
+	// Inline CSS url(...)
+	cssURLRe := regexp.MustCompile(`url\(([^)]*)\)`)
 
-	return result
+	body = cssURLRe.ReplaceAllStringFunc(body, func(match string) string {
+
+		inside := strings.TrimSpace(
+			strings.TrimSuffix(
+				strings.TrimPrefix(match, "url("),
+				")",
+			),
+		)
+
+		quote := ""
+
+		if strings.HasPrefix(inside, `"`) ||
+			strings.HasPrefix(inside, `'`) {
+
+			quote = inside[:1]
+			inside = strings.Trim(inside, `"'`)
+		}
+
+		newURL := rewriteURL(inside)
+
+		return "url(" + quote + newURL + quote + ")"
+	})
+
+
+	return body
 }
 
 func getenv(key, fallback string) string {
