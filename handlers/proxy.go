@@ -378,7 +378,7 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 				return value
 			}
 			if parsed.Host == u.Host {
-				return proxyPrefix + parsed.RequestURI()
+				return proxyPrefix + strings.TrimPrefix(parsed.RequestURI(), "/")
 			}
 			// CDN or external domain: leave untouched
 			return value
@@ -393,7 +393,7 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 		if parsed.IsAbs() {
 			// Only rewrite the original site
 			if parsed.Host == u.Host {
-				return proxyPrefix + parsed.RequestURI()
+				return proxyPrefix + strings.TrimPrefix(parsed.RequestURI(), "/")
 			}
 			return value
 		}
