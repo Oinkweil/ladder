@@ -350,13 +350,10 @@ func fetchSite(urlpath string, queries map[string]string) (string, *http.Request
 }
 
 func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
-
 	body := string(bodyB)
-
 	proxyPrefix := basePath + "/https://" + u.Host + "/"
 
 	rewriteURL := func(value string) string {
-
 		if value == "" {
 			return value
 		}
@@ -366,17 +363,23 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 			return value
 		}
 
+		// Fix malformed absolute URLs with an accidental leading slash
+		if strings.HasPrefix(value, "/https://") {
+			value = strings.TrimPrefix(value, "/")
+		}
+		if strings.HasPrefix(value, "/http://") {
+			value = strings.TrimPrefix(value, "/")
+		}
+
 		// Protocol-relative URLs
 		if strings.HasPrefix(value, "//") {
 			parsed, err := url.Parse("https:" + value)
 			if err != nil {
 				return value
 			}
-
 			if parsed.Host == u.Host {
 				return proxyPrefix + parsed.RequestURI()
 			}
-
 			// CDN or external domain: leave untouched
 			return value
 		}
@@ -388,12 +391,10 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 
 		// Absolute URL
 		if parsed.IsAbs() {
-
 			// Only rewrite the original site
 			if parsed.Host == u.Host {
 				return proxyPrefix + parsed.RequestURI()
 			}
-
 			return value
 		}
 
@@ -405,51 +406,37 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 		return value
 	}
 
-
 	// src attributes
 	srcRe := regexp.MustCompile(`src="([^"]+)"`)
 	body = srcRe.ReplaceAllStringFunc(body, func(match string) string {
-
 		parts := strings.SplitN(match, `"`, 3)
-
 		if len(parts) != 3 {
 			return match
 		}
-
 		return `src="` + rewriteURL(parts[1]) + `"`
 	})
-
 
 	// href attributes
 	hrefRe := regexp.MustCompile(`href="([^"]+)"`)
 	body = hrefRe.ReplaceAllStringFunc(body, func(match string) string {
-
 		parts := strings.SplitN(match, `"`, 3)
-
 		if len(parts) != 3 {
 			return match
 		}
-
 		return `href="` + rewriteURL(parts[1]) + `"`
 	})
-
 
 	// srcset
 	srcsetRe := regexp.MustCompile(`srcset="([^"]+)"`)
 	body = srcsetRe.ReplaceAllStringFunc(body, func(match string) string {
-
 		parts := strings.SplitN(match, `"`, 3)
-
 		if len(parts) != 3 {
 			return match
 		}
 
 		items := strings.Split(parts[1], ",")
-
 		for i, item := range items {
-
 			fields := strings.Fields(strings.TrimSpace(item))
-
 			if len(fields) > 0 {
 				fields[0] = rewriteURL(fields[0])
 				items[i] = strings.Join(fields, " ")
@@ -459,12 +446,9 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 		return `srcset="` + strings.Join(items, ", ") + `"`
 	})
 
-
 	// Inline CSS url(...)
 	cssURLRe := regexp.MustCompile(`url\(([^)]*)\)`)
-
 	body = cssURLRe.ReplaceAllStringFunc(body, func(match string) string {
-
 		inside := strings.TrimSpace(
 			strings.TrimSuffix(
 				strings.TrimPrefix(match, "url("),
@@ -473,10 +457,8 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 		)
 
 		quote := ""
-
 		if strings.HasPrefix(inside, `"`) ||
 			strings.HasPrefix(inside, `'`) {
-
 			quote = inside[:1]
 			inside = strings.Trim(inside, `"'`)
 		}
@@ -485,7 +467,6 @@ func rewriteHtml(bodyB []byte, u *url.URL, rule ruleset.Rule) string {
 
 		return "url(" + quote + newURL + quote + ")"
 	})
-
 
 	return body
 }
